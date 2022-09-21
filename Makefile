@@ -6,3 +6,6 @@ build:
 
 clean:
 	rm -rf dist/
+
+test:
+	go test -v ./...

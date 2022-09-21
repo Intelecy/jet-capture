@@ -8,7 +8,9 @@ import (
 )
 
 type BlockStore[K DestKey] interface {
-	Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) error
+	// Write takes a block and writes it out to a "final" destination as specified by the deskKey, dir and file name.
+	// returns a stringified version of the destination
+	Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, error)
 }
 
 var (
@@ -19,31 +21,33 @@ type FSStore[K DestKey] struct {
 	Resolver func(destKey K) (string, error)
 }
 
-func (f *FSStore[K]) Write(_ context.Context, block io.Reader, destKey K, dir, fileName string) error {
+func (f *FSStore[K]) Write(_ context.Context, block io.Reader, destKey K, dir, fileName string) (string, error) {
 	p, err := f.Resolver(destKey)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	p = path.Join(p, dir)
 
 	if err := os.MkdirAll(p, 0755); err != nil {
-		return err
+		return "", err
 	}
 
-	fout, err := os.Create(path.Join(p, fileName))
+	p = path.Join(p, fileName)
+
+	fout, err := os.Create(p)
 	if err != nil {
-		return err
+		return p, err
 	}
 
 	defer fout.Close()
 
 	_, err = io.Copy(fout, block)
 	if err != nil {
-		return err
+		return p, err
 	}
 
-	return fout.Close()
+	return p, fout.Close()
 }
 
 func SingleDirStore[K DestKey](path string) BlockStore[K] {

@@ -34,32 +34,32 @@ func NewAzureBlobStore[K DestKey](buildURLBase BuildURLBase[K]) (*AzureBlobStore
 	}, nil
 }
 
-func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) error {
+func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, error) {
 	base, err := a.buildURLBase(destKey)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	u, err := url.JoinPath(base, dir, fileName)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	bc, err := azblob.NewBlockBlobClient(u, a.credz, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	var options azblob.UploadStreamOptions
 
 	resp, err := bc.UploadStream(ctx, block, options)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if resp.RawResponse.StatusCode != http.StatusOK {
 		_, _ = io.Copy(os.Stderr, resp.RawResponse.Body)
 	}
 
-	return nil
+	return u, nil
 }

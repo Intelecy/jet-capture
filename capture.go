@@ -3,6 +3,7 @@ package jetcapture
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -100,7 +101,9 @@ func (c *Capture[P, K]) Run(ctx context.Context) error {
 			return err
 		}
 	} else {
-		options = append(options, nats.UserCredentials(c.opts.NATS.Credentials))
+		if c.opts.NATS.Credentials != "" {
+			options = append(options, nats.UserCredentials(c.opts.NATS.Credentials))
+		}
 		if c.nc, err = nats.Connect(c.opts.NATS.Server, options...); err != nil {
 			return err
 		}
@@ -112,8 +115,10 @@ func (c *Capture[P, K]) Run(ctx context.Context) error {
 		return err
 	}
 
-	cinfo, _ := c.js.ConsumerInfo(c.opts.NATS.StreamName, c.opts.NATS.ConsumerName)
-	_ = cinfo
+	cinfo, err := c.js.ConsumerInfo(c.opts.NATS.StreamName, c.opts.NATS.ConsumerName)
+	if err != nil {
+		return err
+	}
 
 	// TODO(jonathan): check acktimeout and compare to opts.MaxAge
 
@@ -125,10 +130,12 @@ func (c *Capture[P, K]) Run(ctx context.Context) error {
 	defer func() {
 		c.sweepBlocks(ctx, true)
 
-		log.Infof("fetched: %d, acked: %d", c.fetched, c.acked)
+		if c.fetched != c.acked {
+			log.Warnf("fetched: %d, acked: %d", c.fetched, c.acked)
+		}
 
-		log.Infof("Drain sub...")
-		if err := sub.Drain(); err != nil {
+		log.Infof("unsubscribing...")
+		if err := sub.Unsubscribe(); err != nil {
 			log.Errorf("sub.Unsubscribe err: %v", err)
 		}
 
@@ -138,31 +145,65 @@ func (c *Capture[P, K]) Run(ctx context.Context) error {
 		}
 
 		wg.Wait()
-
-		log.Infof("exiting")
-		log.Infof("nc.IsClosed: %v", c.nc.IsClosed())
 	}()
 
 	c.start = time.Now()
 
 	for {
-		if err := c.fetch(ctx, sub, cinfo.Config.MaxRequestBatch); err != nil {
-			if err == context.Canceled {
-				err = nil
-			}
-			return err
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
 
-		c.sweepBlocks(ctx, false)
+		forceFlush := false
+
+		if err := c.fetch(ctx, sub, cinfo.Config.MaxRequestBatch); err != nil {
+			switch err {
+			// canceled (e.g. CTRL-C)
+			case context.Canceled:
+				return nil
+
+			// timeout (e.g. no messages right now, or max ack pending reached)
+			case context.DeadlineExceeded:
+
+				// we can't distinguish between a timeout due to no messages available, and
+				// timeout due to max pending reached. so we explicitly query and see if we are close.
+				ci, err := c.js.ConsumerInfo(c.opts.NATS.StreamName, c.opts.NATS.ConsumerName, nats.Context(ctx))
+				if err != nil {
+					return err
+				}
+
+				if ci.NumAckPending >= int(float64(ci.Config.MaxAckPending)*0.95) {
+					forceFlush = true
+				}
+
+			// ¯\_(ツ)_/¯
+			default:
+				log.Error(err)
+				return err
+			}
+		}
+
+		c.sweepBlocks(ctx, forceFlush)
 	}
 }
 
-func (c *Capture[P, K]) sweepBlocks(ctx context.Context, final bool) {
+func (c *Capture[P, K]) sweepBlocks(ctx context.Context, forceFlush bool) {
 	for dk, v := range c.blocks {
 		var keep []*dataBlock[P]
 
 		for _, b := range v {
-			if final || c.newestMessage.After(b.start.Add(c.opts.MaxAge)) || (c.opts.MaxMessages > 0 && b.messageCount >= c.opts.MaxMessages) {
+			// log.Infof("%d %d", c.opts.MaxMessages, b.messageCount)
+			// if forceFlush {
+			// 	log.Info("force flushing")
+			// } else if c.newestMessage.After(b.start.Add(c.opts.MaxAge)) {
+			// 	log.Info("block has aged out")
+			// } else if c.opts.MaxMessages > 0 && b.messageCount >= c.opts.MaxMessages {
+			// 	log.Info("block has exceeded max message count")
+			// }
+
+			if forceFlush || c.newestMessage.After(b.start.Add(c.opts.MaxAge)) || (c.opts.MaxMessages > 0 && b.messageCount >= c.opts.MaxMessages) {
 				if err := c.finalizeBlock(ctx, b, dk); err != nil {
 					log.Error(err)
 				}
@@ -174,9 +215,7 @@ func (c *Capture[P, K]) sweepBlocks(ctx context.Context, final bool) {
 		c.blocks[dk] = keep
 	}
 
-	elapsed := time.Since(c.start)
-
-	log.Infof("messages per second: %d", int(float64(c.acked)/elapsed.Seconds()))
+	c.debugPrint(fmt.Sprintf("sweep done flush=%v", forceFlush))
 }
 
 func (c *Capture[P, K]) finalizeBlock(ctx context.Context, block *dataBlock[P], dk K) error {
@@ -215,16 +254,19 @@ func (c *Capture[P, K]) fileSuffix() string {
 	return suffix
 }
 
-func (c *Capture[P, K]) fetch(ctx context.Context, sub *nats.Subscription, batchSz int) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
+func (c *Capture[P, K]) debugPrint(prefix string) {
+	if false {
+		cinfo, _ := c.js.ConsumerInfo(c.opts.NATS.StreamName, c.opts.NATS.ConsumerName)
+		log.Debugf("%s: NumAckPending=%d NumPending=%d", prefix, cinfo.NumAckPending, cinfo.NumPending)
 	}
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (c *Capture[P, K]) fetch(ctx context.Context, sub *nats.Subscription, batchSz int) error {
+	// TODO(jonathan): background ctx? what should the timeout be?
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
+	// note: fetch will return err == nil if len(messages) > 0
 	messages, err := sub.Fetch(batchSz, nats.Context(ctx))
 	c.fetched += len(messages)
 
@@ -233,7 +275,8 @@ func (c *Capture[P, K]) fetch(ctx context.Context, sub *nats.Subscription, batch
 	}
 
 	if len(messages) != batchSz {
-		log.Infof("len(messages) != batchSz: %d %d", len(messages), batchSz)
+		log.Debugf("len(messages) != batchSz: %d %d", len(messages), batchSz)
+		c.debugPrint("fetch")
 	}
 
 	for _, m := range messages {
@@ -290,7 +333,7 @@ func (c *Capture[P, K]) findBlock(msg *message[P, K], md *nats.MsgMetadata) (*da
 	}
 
 	if block == nil {
-		log.Info("creating a new block...")
+		// log.Debug("creating a new block...")
 		buf, err := c.makeBuffer()
 		if err != nil {
 			return nil, err

@@ -20,8 +20,7 @@ type testDestKey struct {
 func TestFSStore(t *testing.T) {
 	assert := require.New(t)
 
-	tmp, err := os.MkdirTemp("", "")
-	assert.Nil(err)
+	tmp := t.TempDir()
 
 	defer func() {
 		assert.Nil(os.RemoveAll(tmp))

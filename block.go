@@ -67,6 +67,7 @@ func (b *dataBlock[P]) close() error {
 
 func (b *dataBlock[P]) ackAll(nc *nats.Conn) (int, error) {
 	acked := 0
+	// TODO(jonathan): this acks in the _reverse_ order... does it matter?
 	for _, ack := range b.acks {
 		if err := nc.Publish(ack, ackAck); err != nil {
 			log.Errorf("ack error: %v", err)

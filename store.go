@@ -35,6 +35,8 @@ func (f *FSStore[K]) Write(_ context.Context, block io.Reader, destKey K, dir, f
 
 	p = path.Join(p, fileName)
 
+	log.Debugf("writing block to %s", p)
+
 	fout, err := os.Create(p)
 	if err != nil {
 		return p, err

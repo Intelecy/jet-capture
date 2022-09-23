@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -96,7 +97,36 @@ type testOrderDestKey struct {
 	CustomerName string
 }
 
-func TestCapture(t *testing.T) {
+type captureTestConfig struct {
+	messages        int
+	maxAckPending   int
+	maxRequestBatch int
+	ackWait         time.Duration
+	startingOrderID int
+}
+
+var things = map[int]string{
+	0: "hats",
+	1: "shoes",
+	2: "pants",
+	3: "star destroyer",
+}
+
+func validThing(t string) bool {
+	for _, v := range things {
+		if t == v {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	streamName   = "STREAM1"
+	consumerName = "testConsumer"
+)
+
+func initJetStream(t *testing.T, cfg captureTestConfig) (*nats.Conn, nats.JetStreamContext, *server.Server) {
 	assert := require.New(t)
 
 	s := runBasicJetStreamServer(t)
@@ -116,22 +146,12 @@ func TestCapture(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(js)
 
-	const (
-		streamName          = "STREAM1"
-		consumerName        = "testConsumer"
-		messages            = 10000
-		maxAckPending       = 20000
-		maxRequestBatch     = 100
-		maxMessagesPerBlock = 0 // no limit
-		startingOrderID     = 200000
-	)
-
 	_, err = js.AddStream(&nats.StreamConfig{
 		Name:      streamName,
 		Subjects:  []string{"orders.>"},
 		Retention: nats.LimitsPolicy,
 		Storage:   nats.MemoryStorage,
-		MaxMsgs:   int64(messages),
+		MaxMsgs:   int64(cfg.messages),
 	})
 	assert.Nil(err)
 
@@ -140,33 +160,17 @@ func TestCapture(t *testing.T) {
 		AckPolicy:       nats.AckExplicitPolicy,
 		Durable:         consumerName,
 		DeliverPolicy:   nats.DeliverAllPolicy,
-		MaxRequestBatch: maxRequestBatch,
-		AckWait:         time.Minute,
-		MaxAckPending:   maxAckPending,
+		MaxRequestBatch: cfg.maxRequestBatch,
+		AckWait:         cfg.ackWait,
+		MaxAckPending:   cfg.maxAckPending,
 	})
 	assert.Nil(err)
 
 	timestamp := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
 
-	orderID := startingOrderID
+	orderID := cfg.startingOrderID
 
-	things := map[int]string{
-		0: "hats",
-		1: "shoes",
-		2: "pants",
-		3: "star destroyer",
-	}
-
-	validThing := func(t string) bool {
-		for _, v := range things {
-			if t == v {
-				return true
-			}
-		}
-		return false
-	}
-
-	for i := 0; i < messages; i++ {
+	for i := 0; i < cfg.messages; i++ {
 		customerName := string(byte('a' + (i % 26)))
 		subj := fmt.Sprintf("orders.%s.%d", customerName, orderID)
 		payload := fmt.Sprintf(
@@ -190,14 +194,33 @@ func TestCapture(t *testing.T) {
 
 	log.Infof("stream ready at: %s", s.ClientURL())
 
-	assert.EqualValues(messages, sinfo.State.Msgs)
+	assert.EqualValues(cfg.messages, sinfo.State.Msgs)
+
+	return nc, js, s
+}
+
+func TestCapture(t *testing.T) {
+	var (
+		err    error
+		assert = require.New(t)
+	)
+
+	cfg := captureTestConfig{
+		messages:        10000,
+		maxAckPending:   20000,
+		maxRequestBatch: 100,
+		ackWait:         time.Minute,
+		startingOrderID: 200000,
+	}
+
+	_, _, s := initJetStream(t, cfg)
 
 	options := DefaultOptions[*testDecodedOrder, testOrderDestKey]()
 	options.NATS.Server = s.ClientURL()
 	options.NATS.StreamName = streamName
 	options.NATS.ConsumerName = consumerName
 	options.MaxAge = 10 * time.Second
-	options.MaxMessages = maxMessagesPerBlock
+	options.MaxMessages = 0
 	options.Suffix = "csv"
 
 	options.MessageDecoder = func(m *nats.Msg) (*testDecodedOrder, testOrderDestKey, error) {
@@ -205,6 +228,10 @@ func TestCapture(t *testing.T) {
 			decoded testDecodedOrder
 			key     testOrderDestKey
 		)
+
+		if strings.Split(m.Subject, ".")[2] == "200006" {
+			panic(errors.New("no bueno!"))
+		}
 
 		if err := json.Unmarshal(m.Data, &decoded); err != nil {
 			return nil, key, err
@@ -242,7 +269,9 @@ func TestCapture(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err = options.Build().Run(ctx); err != nil {
+	capture := options.Build()
+
+	if err = capture.Run(ctx); err != nil {
 		if err == context.Canceled || err == context.DeadlineExceeded {
 			err = nil
 		}
@@ -297,7 +326,7 @@ func TestCapture(t *testing.T) {
 				// order id
 				oid, err := strconv.Atoi(row1[2])
 				assert.Nil(err)
-				assert.True(oid >= startingOrderID)
+				assert.True(oid >= cfg.startingOrderID)
 
 				// contents
 				assert.True(validThing(row1[3]))
@@ -313,6 +342,9 @@ func TestCapture(t *testing.T) {
 		}))
 	}
 
+	const expectedErrors = 1
+
 	assert.Equal(26, fileCount)
-	assert.Equal(messages, rowCount)
+	assert.Equal(cfg.messages-expectedErrors, rowCount)
+	assert.Equal(capture.fetched-capture.acked, expectedErrors)
 }

@@ -261,6 +261,20 @@ func (c *Capture[P, K]) debugPrint(prefix string) {
 	}
 }
 
+func (c *Capture[P, K]) safeDecode(msg *nats.Msg) (payload P, dk K, err error) {
+	defer func() {
+		if rerr := recover(); rerr != nil {
+			if err2, ok := rerr.(error); ok {
+				err = fmt.Errorf("panic during decode: %w", err2)
+			} else {
+				err = fmt.Errorf("panic during decode: %+v", rerr)
+			}
+		}
+	}()
+
+	return c.opts.MessageDecoder(msg)
+}
+
 func (c *Capture[P, K]) fetch(ctx context.Context, sub *nats.Subscription, batchSz int) error {
 	// TODO(jonathan): background ctx? what should the timeout be?
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
@@ -274,11 +288,6 @@ func (c *Capture[P, K]) fetch(ctx context.Context, sub *nats.Subscription, batch
 		return err
 	}
 
-	if len(messages) != batchSz {
-		log.Debugf("len(messages) != batchSz: %d %d", len(messages), batchSz)
-		c.debugPrint("fetch")
-	}
-
 	for _, m := range messages {
 		md, _ := m.Metadata()
 
@@ -286,9 +295,17 @@ func (c *Capture[P, K]) fetch(ctx context.Context, sub *nats.Subscription, batch
 			c.newestMessage = md.Timestamp
 		}
 
-		decoded, dk, err := c.opts.MessageDecoder(m)
+		decoded, dk, err := c.safeDecode(m)
 		if err != nil {
-			log.Error(err)
+			md, _ := m.Metadata()
+			log.With(
+				"subject", m.Subject,
+				"stream", md.Stream,
+				"consumer", md.Consumer,
+				"timestamp", md.Timestamp,
+				"seq.consumer", md.Sequence.Consumer,
+				"seq.stream", md.Sequence.Stream,
+			).Errorf("unable to process due to err=%v", err)
 			continue
 		}
 

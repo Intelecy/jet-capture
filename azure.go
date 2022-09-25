@@ -15,7 +15,7 @@ var (
 	_ BlockStore[string] = &AzureBlobStore[string]{}
 )
 
-type BuildURLBase[K DestKey] func(destKey K) (string, error)
+type BuildURLBase[K DestKey] func(ctx context.Context, destKey K) (string, error)
 
 type AzureBlobStore[K DestKey] struct {
 	credz        *azidentity.DefaultAzureCredential
@@ -35,7 +35,7 @@ func NewAzureBlobStore[K DestKey](buildURLBase BuildURLBase[K]) (*AzureBlobStore
 }
 
 func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, error) {
-	base, err := a.buildURLBase(destKey)
+	base, err := a.buildURLBase(ctx, destKey)
 	if err != nil {
 		return "", err
 	}
@@ -45,12 +45,16 @@ func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey 
 		return "", err
 	}
 
+	log.Infof("writing block to %s", u)
+
 	bc, err := azblob.NewBlockBlobClient(u, a.credz, nil)
 	if err != nil {
 		return "", err
 	}
 
 	var options azblob.UploadStreamOptions
+
+	options.BufferSize = 64 * 1024 * 1024
 
 	resp, err := bc.UploadStream(ctx, block, options)
 	if err != nil {

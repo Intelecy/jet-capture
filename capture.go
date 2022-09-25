@@ -32,6 +32,10 @@ func init() {
 	log = _log.Sugar()
 }
 
+func SetDefaultLogger(newLogger *zap.Logger) {
+	log = newLogger.Sugar()
+}
+
 type message[P Payload, K DestKey] struct {
 	msg     *nats.Msg
 	Payload P
@@ -86,6 +90,10 @@ func (c *Capture[P, K]) Run(ctx context.Context) error {
 			log.Info("nats.ClosedHandler")
 			wg.Done()
 		}),
+	}
+
+	if c.opts.NATS.InboxPrefix != "" {
+		options = append(options, nats.CustomInboxPrefix(c.opts.NATS.InboxPrefix))
 	}
 
 	if c.opts.NATS.Context != "" {

@@ -27,6 +27,7 @@ type Options[P Payload, K DestKey] struct {
 		Context      string
 		Server       string
 		Credentials  string
+		InboxPrefix  string
 		StreamName   string
 		ConsumerName string
 	}
@@ -59,11 +60,11 @@ func DefaultOptions[P Payload, K DestKey]() *Options[P, K] {
 		MaxAge:      time.Minute * 15,
 		MaxMessages: 0,
 		TempDir:     "",
-		Store: &FSStore[K]{
-			Resolver: func(K) (string, error) {
-				return "capture", nil
-			},
-		},
+		// Store: &FSStore[K]{
+		// 	Resolver: func(K) (string, error) {
+		// 		return "capture", nil
+		// 	},
+		// },
 	}
 
 	options.NATS.Server = nats.DefaultURL

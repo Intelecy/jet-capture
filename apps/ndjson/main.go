@@ -46,7 +46,7 @@ func main() {
 	})
 
 	// finish filling in app metadata and documentation
-	app.Description = "Captures a stream and writes the raw NATS messages to a local directory using new-line delimited JSON."
+	app.Description = "Captures a stream and writes raw NATS messages to a local directory using new-line delimited JSON."
 	app.Authors = []*cli.Author{{
 		Name:  "Jonathan Camp",
 		Email: "jonathan.camp@intelecy.com",

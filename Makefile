@@ -2,7 +2,7 @@ default:
 
 build:
 	mkdir -p dist/
-	cd apps/simple && go build -o ../../dist/jet-capture-simple
+	cd apps/ndjson && go build -o ../../dist/jet-capture-ndjson
 
 clean:
 	rm -rf dist/

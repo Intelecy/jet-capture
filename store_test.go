@@ -26,7 +26,7 @@ func TestFSStore(t *testing.T) {
 		assert.Nil(os.RemoveAll(tmp))
 	}()
 
-	s := &FSStore[testDestKey]{
+	s := &LocalFSStore[testDestKey]{
 		Resolver: func(dk testDestKey) (string, error) {
 			return filepath.Join(tmp, dk.K1, dk.K2), nil
 		},

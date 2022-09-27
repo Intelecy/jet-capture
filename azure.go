@@ -11,10 +11,14 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 )
 
+const azureUploadBufferSz = 64 * 1024 * 1024
+
 var (
 	_ BlockStore[string] = &AzureBlobStore[string]{}
 )
 
+// BuildURLBase should return a URL that serves as the base for the block
+// For example: https://capture.blob.core.windows.net/backup/from-stream-foo/
 type BuildURLBase[K DestKey] func(ctx context.Context, destKey K) (string, error)
 
 type AzureBlobStore[K DestKey] struct {
@@ -54,7 +58,7 @@ func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey 
 
 	var options azblob.UploadStreamOptions
 
-	options.BufferSize = 64 * 1024 * 1024
+	options.BufferSize = azureUploadBufferSz
 
 	resp, err := bc.UploadStream(ctx, block, options)
 	if err != nil {

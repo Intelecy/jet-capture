@@ -10,18 +10,19 @@ import (
 type BlockStore[K DestKey] interface {
 	// Write takes a block and writes it out to a "final" destination as specified by the deskKey, dir and file name.
 	// returns a stringified version of the destination
+	// TODO(jonathan): should the block be an io.ReadCloser?
 	Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, error)
 }
 
 var (
-	_ BlockStore[string] = &FSStore[string]{}
+	_ BlockStore[string] = &LocalFSStore[string]{}
 )
 
-type FSStore[K DestKey] struct {
+type LocalFSStore[K DestKey] struct {
 	Resolver func(destKey K) (string, error)
 }
 
-func (f *FSStore[K]) Write(_ context.Context, block io.Reader, destKey K, dir, fileName string) (string, error) {
+func (f *LocalFSStore[K]) Write(_ context.Context, block io.Reader, destKey K, dir, fileName string) (string, error) {
 	p, err := f.Resolver(destKey)
 	if err != nil {
 		return "", err
@@ -53,7 +54,7 @@ func (f *FSStore[K]) Write(_ context.Context, block io.Reader, destKey K, dir, f
 }
 
 func SingleDirStore[K DestKey](path string) BlockStore[K] {
-	return &FSStore[K]{
+	return &LocalFSStore[K]{
 		Resolver: func(K) (string, error) {
 			// do nothing with K and just return a static path
 			return path, nil

@@ -14,12 +14,12 @@ const (
 	Snappy             = "snappy"
 )
 
-type DestKey interface {
-	comparable
-}
-
 type Payload interface {
 	any
+}
+
+type DestKey interface {
+	comparable
 }
 
 type Options[P Payload, K DestKey] struct {

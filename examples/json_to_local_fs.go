@@ -1,87 +1,14 @@
-# NATS JetStream Capture
+package examples
 
-## Implementation Requirements
+import (
+	"encoding/json"
+	"path/filepath"
+	"time"
 
-### Types
+	"github.com/Intelecy/jet-capture"
+	"github.com/nats-io/nats.go"
+)
 
-```golang
-// Payload
-type Payload interface {
-	any
-}
-
-// DestKey is a type that represents how you want to group (i.e. bucket) your messages.
-type DestKey interface {
-	comparable
-}
-```
-
-### Implement
-
-```golang
-type FormattedDataWriter[P Payload] interface {
-	InitNew(out io.Writer) error
-	Write(payload P) (int, error)
-	Flush() error
-}
-
-type BlockStore[K DestKey] interface {
-	// Write takes a block and writes it out to a "final" destination as specified
-	// by the deskKey, dir and file name. returns a stringified version of the
-	// destination
-	Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, error)
-}
-
-type Options[P Payload, K DestKey] struct {
-	...
-	MessageDecoder func(*nats.Msg) (P, K, error)
-	WriterFactory  func() FormattedDataWriter[P]
-	Store          BlockStore[K]
-}
-```
-
-**MessageDecoder**
-
-```golang
-func(*nats.Msg) (P, K, error)
-```
-
-A `MessageDecoder` is a function that takes a `*nats.Msg` and returns a decoded message of type `P` and a "destination
-key" of type `K`.
-
-**WriterFactory**
-
-```golang
-func() FormattedDataWriter[P]
-```
-
-A `WriterFactory` is a function that returns a `FormattedDataWriter[P]`. It is called once for each new "block", where a
-block is a group of related messages (by `DestKey`) for a specific time range.
-
-A `WriterFactory` implements `FormattedDataWriter[P]`, which writes formated data (e.g. CSV, Parquet, etc.) to an
-`io.Writer`.
-
-```golang
-type FormattedDataWriter[P Payload] interface {
-	InitNew(out io.Writer) error
-	Write(payload P) (int, error)
-	Flush() error
-}
-```
-
-**Store**
-
-A `BlockStore` takes a block and writes it out to a "final" destination as specified by the `DestKey`.
-
-```golang
-type BlockStore[K DestKey] interface {
-	Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, error)
-}
-```
-
-## Example
-
-```golang
 // ExamplePayload is our explicit struct for the NATS messages
 type ExamplePayload struct {
 	FirstName string `json:"first_name"`
@@ -138,4 +65,3 @@ var JSONToLocalFsCSV = &jetcapture.Options[*ExamplePayload, ExampleDestKey]{
 		},
 	},
 }
-```

@@ -260,7 +260,7 @@ func TestCapture(t *testing.T) {
 
 	output := t.TempDir()
 
-	options.Store = &FSStore[testOrderDestKey]{
+	options.Store = &LocalFSStore[testOrderDestKey]{
 		Resolver: func(dk testOrderDestKey) (string, error) {
 			return filepath.Join(output, dk.CustomerName), nil
 		},

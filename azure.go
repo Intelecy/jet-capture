@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 )
 
@@ -22,16 +22,14 @@ var (
 type BuildURLBase[K DestKey] func(ctx context.Context, destKey K) (string, error)
 
 type AzureBlobStore[K DestKey] struct {
-	credz        *azidentity.DefaultAzureCredential
+	credz        azcore.TokenCredential
 	buildURLBase BuildURLBase[K]
 }
 
-func NewAzureBlobStore[K DestKey](buildURLBase BuildURLBase[K]) (*AzureBlobStore[K], error) {
-	credential, err := azidentity.NewDefaultAzureCredential(nil)
-	if err != nil {
-		return nil, err
-	}
-
+func NewAzureBlobStore[K DestKey](
+	credential azcore.TokenCredential,
+	buildURLBase BuildURLBase[K],
+) (*AzureBlobStore[K], error) {
 	return &AzureBlobStore[K]{
 		buildURLBase: buildURLBase,
 		credz:        credential,

@@ -2,21 +2,15 @@ package jetcapture
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/snappy"
-	"github.com/nats-io/jsm.go/natscontext"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-)
-
-var (
-	ErrUnknownCompression = errors.New("unknown compression type")
 )
 
 const (
@@ -61,20 +55,23 @@ type Capture[P Payload, K DestKey] struct {
 	start time.Time
 }
 
-func NewCapture[P Payload, K DestKey](opts Options[P, K]) *Capture[P, K] {
+func New[P Payload, K DestKey](opts Options[P, K]) *Capture[P, K] {
 	return &Capture[P, K]{
 		opts:   opts,
 		blocks: map[K][]*dataBlock[P]{},
 	}
 }
 
-func (c *Capture[P, K]) Run(ctx context.Context) error {
-	switch c.opts.Compression {
-	case Snappy:
-	case GZip:
-	case None:
-	default:
-		return ErrUnknownCompression
+func (c *Capture[P, K]) Run(ctx context.Context, nc *nats.Conn) error {
+	if err := c.opts.Validate(); err != nil {
+		return err
+	}
+
+	c.nc = nc
+
+	// quick ping to test the connection
+	if err := c.nc.Flush(); err != nil {
+		return err
 	}
 
 	var (
@@ -82,55 +79,26 @@ func (c *Capture[P, K]) Run(ctx context.Context) error {
 		err error
 	)
 
-	options := []nats.Option{
-		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
-			log.Error(err)
-		}),
-		nats.ClosedHandler(func(*nats.Conn) {
-			log.Info("nats.ClosedHandler")
-			wg.Done()
-		}),
-	}
-
-	if c.opts.NATS.InboxPrefix != "" {
-		options = append(options, nats.CustomInboxPrefix(c.opts.NATS.InboxPrefix))
-	}
-
-	if c.opts.NATS.Context != "" {
-		nctx, err := natscontext.New(
-			c.opts.NATS.Context,
-			true,
-		)
-		if err != nil {
-			return err
-		}
-
-		if c.nc, err = nctx.Connect(options...); err != nil {
-			return err
-		}
-	} else {
-		if c.opts.NATS.Credentials != "" {
-			options = append(options, nats.UserCredentials(c.opts.NATS.Credentials))
-		}
-		if c.nc, err = nats.Connect(c.opts.NATS.Server, options...); err != nil {
-			return err
-		}
-	}
+	// TODO(jonathan): check if the incoming connection already has a ClosedHandler
 
 	wg.Add(1)
+	c.nc.SetClosedHandler(func(*nats.Conn) {
+		log.Info("nats.ClosedHandler")
+		wg.Done()
+	})
 
 	if c.js, err = c.nc.JetStream(); err != nil {
 		return err
 	}
 
-	cinfo, err := c.js.ConsumerInfo(c.opts.NATS.StreamName, c.opts.NATS.ConsumerName)
+	cinfo, err := c.js.ConsumerInfo(c.opts.NATSStreamName, c.opts.NATSConsumerName)
 	if err != nil {
 		return err
 	}
 
 	// TODO(jonathan): check acktimeout and compare to opts.MaxAge
 
-	sub, err := c.js.PullSubscribe(_EMPTY_, c.opts.NATS.ConsumerName, nats.Bind(c.opts.NATS.StreamName, c.opts.NATS.ConsumerName))
+	sub, err := c.js.PullSubscribe(_EMPTY_, c.opts.NATSConsumerName, nats.Bind(c.opts.NATSStreamName, c.opts.NATSConsumerName))
 	if err != nil {
 		return err
 	}
@@ -177,7 +145,7 @@ func (c *Capture[P, K]) Run(ctx context.Context) error {
 
 				// we can't distinguish between a timeout due to no messages available, and
 				// timeout due to max pending reached. so we explicitly query and see if we are close.
-				ci, err := c.js.ConsumerInfo(c.opts.NATS.StreamName, c.opts.NATS.ConsumerName, nats.Context(ctx))
+				ci, err := c.js.ConsumerInfo(c.opts.NATSStreamName, c.opts.NATSConsumerName, nats.Context(ctx))
 				if err != nil {
 					return err
 				}
@@ -264,7 +232,7 @@ func (c *Capture[P, K]) fileSuffix() string {
 
 func (c *Capture[P, K]) debugPrint(prefix string) {
 	if false {
-		cinfo, _ := c.js.ConsumerInfo(c.opts.NATS.StreamName, c.opts.NATS.ConsumerName)
+		cinfo, _ := c.js.ConsumerInfo(c.opts.NATSStreamName, c.opts.NATSConsumerName)
 		log.Debugf("%s: NumAckPending=%d NumPending=%d", prefix, cinfo.NumAckPending, cinfo.NumPending)
 	}
 }

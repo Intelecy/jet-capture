@@ -216,9 +216,8 @@ func TestCapture(t *testing.T) {
 	_, _, s := initJetStream(t, cfg)
 
 	options := DefaultOptions[*testDecodedOrder, testOrderDestKey]()
-	options.NATS.Server = s.ClientURL()
-	options.NATS.StreamName = streamName
-	options.NATS.ConsumerName = consumerName
+	options.NATSStreamName = streamName
+	options.NATSConsumerName = consumerName
 	options.MaxAge = 10 * time.Second
 	options.MaxMessages = 0
 	options.Suffix = "csv"
@@ -271,7 +270,12 @@ func TestCapture(t *testing.T) {
 
 	capture := options.Build()
 
-	if err = capture.Run(ctx); err != nil {
+	nc, err := nats.Connect(s.ClientURL())
+	assert.Nil(err)
+
+	defer nc.Close()
+
+	if err = capture.Run(ctx, nc); err != nil {
 		if err == context.Canceled || err == context.DeadlineExceeded {
 			err = nil
 		}

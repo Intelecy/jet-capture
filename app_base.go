@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/nats-io/jsm.go/natscontext"
 	"github.com/nats-io/nats.go"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
@@ -33,6 +34,11 @@ func NewAppSkeleton[P Payload, K DestKey](setup func(c *cli.Context, options *Op
 			Name:    "nats-creds",
 			EnvVars: []string{"NATS_CREDS"},
 			Usage:   "NATS user credentials",
+		},
+		&cli.StringFlag{
+			Name:  "nats-inbox-prefix",
+			Usage: "NATS inbox prefix",
+			Value: nats.InboxPrefix,
 		},
 		&cli.StringFlag{
 			Name:     "stream-name",
@@ -97,17 +103,12 @@ func NewAppSkeleton[P Payload, K DestKey](setup func(c *cli.Context, options *Op
 	}
 
 	app.Action = func(c *cli.Context) error {
+		var err error
+
 		options := DefaultOptions[P, K]()
 
-		if c.IsSet("nats-context") {
-			options.NATS.Context = c.String("nats-context")
-		} else {
-			options.NATS.Server = c.String("nats-server")
-			options.NATS.Credentials = c.String("nats-creds")
-		}
-
-		options.NATS.StreamName = c.String("stream-name")
-		options.NATS.ConsumerName = c.String("consumer-name")
+		options.NATSStreamName = c.String("stream-name")
+		options.NATSConsumerName = c.String("consumer-name")
 		options.MaxAge = c.Duration("max-age")
 		options.BufferToDisk = c.Bool("buffer-to-disk")
 		options.Compression = Compression(c.String("compression"))
@@ -119,7 +120,45 @@ func NewAppSkeleton[P Payload, K DestKey](setup func(c *cli.Context, options *Op
 			}
 		}
 
-		return options.Build().Run(c.Context)
+		noptions := []nats.Option{
+			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+				log.Error(err)
+			}),
+		}
+
+		if c.IsSet("nats-inbox-prefix") {
+			noptions = append(noptions, nats.CustomInboxPrefix(c.String("nats-inbox-prefix")))
+		}
+
+		if c.IsSet("nats-context") {
+			nctx, err := natscontext.New(c.String("nats-context"), true)
+			if err != nil {
+				return err
+			}
+
+			ctxOptions, err := nctx.NATSOptions()
+			if err != nil {
+				return err
+			}
+
+			noptions = append(noptions, ctxOptions...)
+			if err != nil {
+				return err
+			}
+		} else {
+			if c.IsSet("nats-creds") {
+				noptions = append(noptions, nats.UserCredentials(c.String("nats-creds")))
+			}
+		}
+
+		nc, err := nats.Connect(c.String("nats-server"), noptions...)
+		if err != nil {
+			return err
+		}
+
+		defer nc.Close()
+
+		return options.Build().Run(c.Context, nc)
 	}
 
 	return app

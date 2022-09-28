@@ -13,7 +13,7 @@ type NatsMessage struct {
 	Metadata *nats.MsgMetadata   `json:"metadata"`
 }
 
-func NatsToJson[K DestKey](resolve func(msg *nats.Msg) K) func(msg *nats.Msg) (*NatsMessage, K, error) {
+func NatsToNats[K DestKey](resolve func(msg *nats.Msg) K) func(msg *nats.Msg) (*NatsMessage, K, error) {
 	return func(msg *nats.Msg) (*NatsMessage, K, error) {
 		dk := resolve(msg)
 

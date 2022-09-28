@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/Intelecy/jet-capture"
@@ -30,17 +31,37 @@ func main() {
 		Usage:    "local output directory",
 	}
 
+	groupByFlag := &cli.BoolFlag{
+		Name:  "group-by-subject",
+		Value: false,
+		Usage: "should the output files be grouped by message subject",
+	}
+
 	// initialize the cli app and implement the required callback to finish setting
 	// up the capture options struct with our specific decoder, writer, and store
 	// and any other overrides.
 	app := jetcapture.NewAppSkeleton[P, K](func(c *cli.Context, options *jetcapture.Options[P, K]) error {
 		options.Suffix = "json"
 
-		options.MessageDecoder = jetcapture.NatsToJson[K](jetcapture.SubjectToDestKey)
+		// set up a decoder that just copies the underlying NATS message to a struct that can easily be serialized
+		// and also set the destination key to the nats subject
+		options.MessageDecoder = jetcapture.NatsToNats[K](jetcapture.SubjectToDestKey)
+
+		// set up a new-line delimited JSON writer
 		options.WriterFactory = func() jetcapture.FormattedDataWriter[P] {
 			return &jetcapture.NewLineDelimitedJSON[P]{}
 		}
-		options.Store = jetcapture.SingleDirStore[K](c.Path(outputFlag.Name))
+
+		if c.Bool(groupByFlag.Name) {
+			options.Store = &jetcapture.LocalFSStore[K]{
+				Resolver: func(subject K) (string, error) {
+					return filepath.Join(c.Path(outputFlag.Name), subject), nil
+				},
+			}
+		} else {
+			// set up a simple local directory store
+			options.Store = jetcapture.SingleDirStore[K](c.Path(outputFlag.Name))
+		}
 
 		return nil
 	})
@@ -54,7 +75,7 @@ func main() {
 	app.Copyright = "2022 Intelecy AS"
 
 	// append our additional flags
-	app.Flags = append(app.Flags, outputFlag)
+	app.Flags = append(app.Flags, outputFlag, groupByFlag)
 
 	// and liftoff!
 	if err := app.RunContext(ctx, os.Args); err != nil {

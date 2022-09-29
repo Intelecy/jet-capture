@@ -1,16 +1,68 @@
 # NATS JetStream Capture
 
-## Implementation Requirements
+> Note: requires Go 1.19 or later
+
+## Overview
+
+**jetcapture** is a library for building continious [NATS JetStream](https://docs.nats.io/nats-concepts/jetstream)
+backup processes.
+
+* **Decode**      -- take the incoming NATS message and deserialize it into something concrete
+* **Split**       -- optionally split the incoming message stream and group the messages by one or more user-defined
+                     attributes
+* **Serialize**   -- write blocks of decoded messages to group-specific "blocks" using a provided serialization method
+                     (e.g. CSV, Parquet, raw-bytes)
+* **Store**       -- copy the completed blocks to a user-provided storage endpoint (e.g. local folder, Azure, etc.)
+
+For example, you can take a stream of JSON pizza orders, group them by `store_id`, and write them out as flattened CSV
+in 15 minute blocks with a separate location (e.g. folder, or S3 bucket) for each store.
+
+**jetcapture** uses a [pull consumer](https://docs.nats.io/nats-concepts/jetstream/consumers) which means horizontal
+scalability is built in. Just add more instances to increase throughput.
+
+### Internal Data Flow
+
+1. **jetcapture** begins pulling messages from a named consumer and stream
+2. For each message:
+   1. Pass the raw NATS message into the user-provided **decoder**, returning a typed struct and an optional
+      "destination key"
+   2. Find a corresponding "block" using the **destination key** and the message timestamp (truncated to the storage
+      interval)
+   3. Call the user-provided **serialize** function and write the decoded message into a block-specific temporary buffer
+   4. Cache the message ack information for later
+3. After each storage interval has passed, for each block:
+   1. Call the user-provided **store** function to persist the block to a permanent storage location
+   2. Assuming storage of the block succeeded, "ack" all the messages in the block
+
+## Custom Implementation Requirements
+
+> Note: **jetcapture** uses Go generics to enable strongly typed callback implementations
+
+1. Define your `Payload P` and `DestKey K` types
+2. Implement a `MessageDecoder` that takes a `*nats.Msg` and returns a decoded message of type `P` and a "destination
+   key" of type `K`
+3. Implement a `FormattedDataWriter[P Payload]` which takes a payload `P` "writes" it to an underlying `io.Writer`. Or,
+   use a helper writer like `CSVWriter[P Payload]` or `NewLineDelimitedJSON[P Payload]`
+4. Implement a `BlockStore[K DestKey]` which can write out the finalized "block" (exposed as `io.Reader`). Or, use a
+   helper like `LocalFSStore[K DestKey]` or `AzureBlobStore[K DestKey]`
+5. Create a typed `jetcapture.Options[P, K]` instance with options set
+6. Connect to a NATS server
+7. Call `options.Build().Run(ctx, natsConn)`
+
+For a full example see the [sample application](apps/ndjson/main.go) that takes incoming NATS messages, encodes the entire message itself as
+JSON, and writes it out using newline-delimited JSON.
+
+For an example of a custom decoder (which most libary users will need), see the example below
 
 ### Types
 
 ```golang
-// Payload
+// Payload is a type that represents your deserialized NATS message
 type Payload interface {
 	any
 }
 
-// DestKey is a type that represents how you want to group (i.e. bucket) your messages.
+// DestKey is a type that represents how you want to group (i.e. split) your messages.
 type DestKey interface {
 	comparable
 }
@@ -40,44 +92,6 @@ type Options[P Payload, K DestKey] struct {
 }
 ```
 
-**MessageDecoder**
-
-```golang
-func(*nats.Msg) (P, K, error)
-```
-
-A `MessageDecoder` is a function that takes a `*nats.Msg` and returns a decoded message of type `P` and a "destination
-key" of type `K`.
-
-**WriterFactory**
-
-```golang
-func() FormattedDataWriter[P]
-```
-
-A `WriterFactory` is a function that returns a `FormattedDataWriter[P]`. It is called once for each new "block", where a
-block is a group of related messages (by `DestKey`) for a specific time range.
-
-A `WriterFactory` implements `FormattedDataWriter[P]`, which writes formated data (e.g. CSV, Parquet, etc.) to an
-`io.Writer`.
-
-```golang
-type FormattedDataWriter[P Payload] interface {
-	InitNew(out io.Writer) error
-	Write(payload P) (int, error)
-	Flush() error
-}
-```
-
-**Store**
-
-A `BlockStore` takes a block and writes it out to a "final" destination as specified by the `DestKey`.
-
-```golang
-type BlockStore[K DestKey] interface {
-	Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, error)
-}
-```
 
 ## Example
 
@@ -139,3 +153,20 @@ var JSONToLocalFsCSV = &jetcapture.Options[*ExamplePayload, ExampleDestKey]{
 	},
 }
 ```
+
+## TODO
+
+- [ ] Decide on explicit `nack` strategy where possible
+- [ ] Add S3 store example
+- [ ] Stats export
+- [ ] Add `DrainTimeout` for `Capture.sweepBlocks`. Right now a canceled context (e.g. CTRL-C) triggers a final sweep.
+      However, for calls that _take_ a context during a `BlockStore.Write` call (e.g. Azure blob store), the call will
+      often be short-circuited. A separate drain/sweep context should be created with a timeout.
+- [ ] Add better logging configuration/interface
+- [ ] Add support for checking outstanding acks and warning if near or at limit
+- [ ] Investigate a Go routine pool for `BlockStore.Write` (current code blocks during the write phase)
+- [ ] Output filenames need some more thought
+
+## Credits
+
+* Jonathan Camp @intelecy

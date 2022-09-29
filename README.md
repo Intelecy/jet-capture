@@ -4,21 +4,22 @@
 
 ## Overview
 
-**jetcapture** is a library for building continuous [NATS JetStream](https://docs.nats.io/nats-concepts/jetstream)
+**jetcapture** is a library for building reliable and continuous [NATS JetStream](https://docs.nats.io/nats-concepts/jetstream)
 backup processes.
 
 * **Decode**      -- take the incoming NATS message and deserialize it into something concrete
 * **Split**       -- optionally split the incoming message stream and group the messages by one or more user-defined
                      attributes
-* **Serialize**   -- write blocks of decoded messages to group-specific "blocks" using a provided serialization method
-                     (e.g. CSV, Parquet, raw-bytes)
-* **Store**       -- copy the completed blocks to a user-provided storage endpoint (e.g. local folder, Azure, etc.)
+* **Serialize**   -- write decoded messages to group-specific "blocks" using a provided serialization method (e.g. CSV,
+                     Parquet, raw-bytes)
+* **Store**       -- copy the completed blocks to a user-provided storage endpoint (e.g. local folders, Azure, etc.)
 
-For example, you can take a stream of JSON pizza orders, group them by `store_id`, and write them out as flattened CSV
-in 15 minute blocks with a separate location (e.g. folder, or S3 bucket) for each store.
+For example, you can take a stream of JSON pizza orders, group them by `pizza_store_id`, and write them out as flattened
+CSV in 15 minute blocks with a separate location (e.g. folder, or S3 bucket) for each store.
 
 **jetcapture** uses a [pull consumer](https://docs.nats.io/nats-concepts/jetstream/consumers) which means horizontal
 scalability is built in. Just add more instances to increase throughput.
+
 
 ### Internal Data Flow
 

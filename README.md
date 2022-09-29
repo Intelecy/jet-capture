@@ -4,7 +4,7 @@
 
 ## Overview
 
-**jetcapture** is a library for building continious [NATS JetStream](https://docs.nats.io/nats-concepts/jetstream)
+**jetcapture** is a library for building continuous [NATS JetStream](https://docs.nats.io/nats-concepts/jetstream)
 backup processes.
 
 * **Decode**      -- take the incoming NATS message and deserialize it into something concrete

@@ -69,31 +69,6 @@ type DestKey interface {
 }
 ```
 
-### Implement
-
-```golang
-type FormattedDataWriter[P Payload] interface {
-	InitNew(out io.Writer) error
-	Write(payload P) (int, error)
-	Flush() error
-}
-
-type BlockStore[K DestKey] interface {
-	// Write takes a block and writes it out to a "final" destination as specified
-	// by the deskKey, dir and file name. returns a stringified version of the
-	// destination
-	Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, error)
-}
-
-type Options[P Payload, K DestKey] struct {
-	...
-	MessageDecoder func(*nats.Msg) (P, K, error)
-	WriterFactory  func() FormattedDataWriter[P]
-	Store          BlockStore[K]
-}
-```
-
-
 ## Example
 
 ```golang

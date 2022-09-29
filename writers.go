@@ -6,9 +6,18 @@ import (
 	"io"
 )
 
+// FormattedDataWriter specifies a method for writing a `Payload` to an `io.Writer`
+// It will be used from a "factory" function. Meaning a new writer will be created for each block
 type FormattedDataWriter[P Payload] interface {
+	// InitNew is called by jetcapture passing in an `io.Writer` that is the underlying temporary storage for this block
+	// The implementation is expected to keep a reference to it and use it during the `Write()` calls
 	InitNew(out io.Writer) error
+
+	// Write should write the payload internally and eventually the underlying `io.Writer`
+	// Buffering data/writes is fine as long as a call to `Flush` ensures that everything is written
 	Write(payload P) (int, error)
+
+	// Flush is called after each block of messages is processed. Can be a nop depending on the implementation.
 	Flush() error
 }
 

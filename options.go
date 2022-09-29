@@ -29,14 +29,14 @@ const (
 )
 
 type Options[P Payload, K DestKey] struct {
-	NATSStreamName   string
-	NATSConsumerName string
-	Compression      Compression
-	Suffix           string
-	BufferToDisk     bool
-	MaxAge           time.Duration
-	MaxMessages      int
-	TempDir          string
+	NATSStreamName   string        // which stream should jetcapture bind to
+	NATSConsumerName string        // which consumer should jetcapture bind to
+	Compression      Compression   // apply compression to the resulting files
+	Suffix           string        // add a suffix
+	BufferToDisk     bool          // should jetcapture buffer to disk using temp files, or keep blocks in memory
+	MaxAge           time.Duration // what is the max duration for a single block
+	MaxMessages      int           // rough limit to the number of messages in a block before a new one is created
+	TempDir          string        // override the default OS temp dir
 
 	// TODO
 	// MaxSize        int

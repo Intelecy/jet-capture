@@ -265,6 +265,11 @@ func TestCapture(t *testing.T) {
 		},
 	}
 
+	options.OnStoreComplete = func(dk testOrderDestKey, p string, n int64, d time.Duration, err error) {
+		assert.Nil(err)
+		assert.True(n > 0)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

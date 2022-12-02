@@ -203,7 +203,20 @@ func (c *Capture[P, K]) finalizeBlock(ctx context.Context, block *dataBlock[P], 
 		return err
 	}
 
-	if _, err := c.opts.Store.Write(ctx, block, dk, block.path(), block.fileName("backup", c.fileSuffix())); err != nil {
+	var (
+		p   string // path
+		n   int64  // bytes written
+		dur time.Duration
+		err error
+	)
+
+	if c.opts.OnStoreComplete != nil {
+		defer func() {
+			c.opts.OnStoreComplete(dk, p, n, dur, err)
+		}()
+	}
+
+	if p, n, dur, err = c.opts.Store.Write(ctx, block, dk, block.path(), block.fileName("backup", c.fileSuffix())); err != nil {
 		return err
 	}
 

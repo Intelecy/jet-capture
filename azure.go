@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
@@ -36,36 +37,51 @@ func NewAzureBlobStore[K DestKey](
 	}, nil
 }
 
-func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, error) {
+func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, int64, time.Duration, error) {
+	start := time.Now()
+
 	base, err := a.buildURLBase(ctx, destKey)
 	if err != nil {
-		return "", err
+		return "", 0, 0, err
 	}
 
 	u, err := url.JoinPath(base, dir, fileName)
 	if err != nil {
-		return "", err
+		return "", 0, 0, err
 	}
 
 	log.Infof("writing block to %s", u)
 
 	bc, err := azblob.NewBlockBlobClient(u, a.credz, nil)
 	if err != nil {
-		return "", err
+		return "", 0, 0, err
 	}
 
 	var options azblob.UploadStreamOptions
 
 	options.BufferSize = azureUploadBufferSz
 
-	resp, err := bc.UploadStream(ctx, block, options)
+	reader := &countingReader{Reader: block}
+
+	resp, err := bc.UploadStream(ctx, reader, options)
 	if err != nil {
-		return "", err
+		return "", 0, 0, err
 	}
 
 	if resp.RawResponse.StatusCode != http.StatusOK {
 		_, _ = io.Copy(os.Stderr, resp.RawResponse.Body)
 	}
 
-	return u, nil
+	return u, int64(reader.n), time.Since(start), nil
+}
+
+type countingReader struct {
+	io.Reader
+	n int
+}
+
+func (r *countingReader) Read(p []byte) (n int, err error) {
+	n, err = r.Reader.Read(p)
+	r.n += n
+	return
 }

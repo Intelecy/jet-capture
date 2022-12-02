@@ -44,9 +44,10 @@ type Options[P Payload, K DestKey] struct {
 	// TODO
 	// WriteEmptyFile bool
 
-	MessageDecoder func(*nats.Msg) (P, K, error)
-	WriterFactory  func() FormattedDataWriter[P]
-	Store          BlockStore[K]
+	MessageDecoder  func(*nats.Msg) (P, K, error)
+	WriterFactory   func() FormattedDataWriter[P]
+	Store           BlockStore[K]
+	OnStoreComplete func(K, string, int64, time.Duration, error) // optional callback for metrics capture
 }
 
 func (o *Options[P, K]) Build() *Capture[P, K] {

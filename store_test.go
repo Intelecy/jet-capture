@@ -39,12 +39,13 @@ func TestFSStore(t *testing.T) {
 	var buf bytes.Buffer
 	buf.WriteString(testString)
 
-	p, err := s.Write(ctx, &buf, testDestKey{
+	p, n, _, err := s.Write(ctx, &buf, testDestKey{
 		K1: "k1",
 		K2: "k2",
 	}, "foo", "some-file-name")
 
 	assert.Nil(err)
+	assert.EqualValues(n, 61)
 	assert.Equal(filepath.Join(tmp, "k1", "k2", "foo", "some-file-name"), p)
 
 	b, err := os.ReadFile(p)

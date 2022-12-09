@@ -79,10 +79,14 @@ func (c *Capture[P, K]) Run(ctx context.Context, nc *nats.Conn) error {
 		err error
 	)
 
-	// TODO(jonathan): check if the incoming connection already has a ClosedHandler
+	oldClosedCB := nc.Opts.ClosedCB
 
 	wg.Add(1)
-	c.nc.SetClosedHandler(func(*nats.Conn) {
+	c.nc.SetClosedHandler(func(_nc *nats.Conn) {
+		if oldClosedCB != nil {
+			oldClosedCB(_nc)
+		}
+
 		log.Info("nats.ClosedHandler")
 		wg.Done()
 	})

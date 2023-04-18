@@ -181,13 +181,15 @@ func initJetStream(t *testing.T, cfg captureTestConfig) (*nats.Conn, nats.JetStr
 			things[orderID%len(things)],
 		)
 
-		assert.Nil(nc.Publish(subj, []byte(payload)))
+		_, err := js.PublishAsync(subj, []byte(payload))
+		assert.Nil(err)
 
 		orderID++
 		timestamp = timestamp.Add(time.Second)
 	}
 
 	assert.Nil(nc.Flush())
+	<-js.PublishAsyncComplete()
 
 	sinfo, err := js.StreamInfo(streamName)
 	assert.Nil(err)

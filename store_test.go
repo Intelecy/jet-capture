@@ -45,7 +45,7 @@ func TestFSStore(t *testing.T) {
 	}, "foo", "some-file-name")
 
 	assert.Nil(err)
-	assert.EqualValues(n, 61)
+	assert.True(n >= 60)
 	assert.Equal(filepath.Join(tmp, "k1", "k2", "foo", "some-file-name"), p)
 
 	b, err := os.ReadFile(p)

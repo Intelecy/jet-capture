@@ -3,7 +3,7 @@ package jetcapture
 import (
 	"context"
 	"fmt"
-	"sync"
+	"github.com/pkg/errors"
 	"time"
 
 	"github.com/klauspost/compress/gzip"
@@ -62,7 +62,7 @@ func New[P Payload, K DestKey](opts Options[P, K]) *Capture[P, K] {
 	}
 }
 
-func (c *Capture[P, K]) Run(ctx context.Context, nc *nats.Conn) error {
+func (c *Capture[P, K]) Run(ctx context.Context, nc *nats.Conn) (err error) {
 	if err := c.opts.Validate(); err != nil {
 		return err
 	}
@@ -74,21 +74,18 @@ func (c *Capture[P, K]) Run(ctx context.Context, nc *nats.Conn) error {
 		return err
 	}
 
-	var (
-		wg  sync.WaitGroup
-		err error
-	)
+	var closeChan = make(chan struct{})
 
 	oldClosedCB := nc.Opts.ClosedCB
 
-	wg.Add(1)
 	c.nc.SetClosedHandler(func(_nc *nats.Conn) {
+		defer close(closeChan)
+
 		if oldClosedCB != nil {
 			oldClosedCB(_nc)
 		}
 
 		log.Info("nats.ClosedHandler")
-		wg.Done()
 	})
 
 	if c.js, err = c.nc.JetStream(); err != nil {
@@ -124,7 +121,12 @@ func (c *Capture[P, K]) Run(ctx context.Context, nc *nats.Conn) error {
 			log.Errorf("nc.Drain err: %v", err)
 		}
 
-		wg.Wait()
+		select {
+		case <-closeChan:
+			return
+		case <-time.After(nats.DefaultDrainTimeout):
+			err = errors.New("timeout waiting for nats close callback. did you override an existing nats close handler?")
+		}
 	}()
 
 	c.start = time.Now()
@@ -174,15 +176,6 @@ func (c *Capture[P, K]) sweepBlocks(ctx context.Context, forceFlush bool) {
 		var keep []*dataBlock[P]
 
 		for _, b := range v {
-			// log.Infof("%d %d", c.opts.MaxMessages, b.messageCount)
-			// if forceFlush {
-			// 	log.Info("force flushing")
-			// } else if c.newestMessage.After(b.start.Add(c.opts.MaxAge)) {
-			// 	log.Info("block has aged out")
-			// } else if c.opts.MaxMessages > 0 && b.messageCount >= c.opts.MaxMessages {
-			// 	log.Info("block has exceeded max message count")
-			// }
-
 			if forceFlush || c.newestMessage.After(b.start.Add(c.opts.MaxAge)) || (c.opts.MaxMessages > 0 && b.messageCount >= c.opts.MaxMessages) {
 				if err := c.finalizeBlock(ctx, b, dk); err != nil {
 					log.Error(err)

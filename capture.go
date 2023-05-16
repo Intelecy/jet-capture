@@ -92,7 +92,7 @@ func (c *Capture[P, K]) Run(ctx context.Context, nc *nats.Conn) (err error) {
 		return err
 	}
 
-	cinfo, err := c.js.ConsumerInfo(c.opts.NATSStreamName, c.opts.NATSConsumerName)
+	cinfo, err := c.consumerInfo(ctx)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (c *Capture[P, K]) Run(ctx context.Context, nc *nats.Conn) (err error) {
 
 				// we can't distinguish between a timeout due to no messages available, and
 				// timeout due to max pending reached. so we explicitly query and see if we are close.
-				ci, err := c.js.ConsumerInfo(c.opts.NATSStreamName, c.opts.NATSConsumerName, nats.Context(ctx))
+				ci, err := c.consumerInfo(ctx)
 				if err != nil {
 					return err
 				}
@@ -169,6 +169,13 @@ func (c *Capture[P, K]) Run(ctx context.Context, nc *nats.Conn) (err error) {
 
 		c.sweepBlocks(ctx, forceFlush)
 	}
+}
+
+func (c *Capture[P, K]) consumerInfo(ctx context.Context) (*nats.ConsumerInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+
+	return c.js.ConsumerInfo(c.opts.NATSStreamName, c.opts.NATSConsumerName, nats.Context(ctx))
 }
 
 func (c *Capture[P, K]) sweepBlocks(ctx context.Context, forceFlush bool) {
@@ -193,7 +200,7 @@ func (c *Capture[P, K]) sweepBlocks(ctx context.Context, forceFlush bool) {
 
 func (c *Capture[P, K]) finalizeBlock(ctx context.Context, block *dataBlock[P], dk K) error {
 	defer func() {
-		block.buffer.Remove()
+		_ = block.buffer.Remove()
 	}()
 
 	if err := block.close(); err != nil {
@@ -242,7 +249,7 @@ func (c *Capture[P, K]) fileSuffix() string {
 
 func (c *Capture[P, K]) debugPrint(prefix string) {
 	if false {
-		cinfo, _ := c.js.ConsumerInfo(c.opts.NATSStreamName, c.opts.NATSConsumerName)
+		cinfo, _ := c.consumerInfo(context.Background())
 		log.Debugf("%s: NumAckPending=%d NumPending=%d", prefix, cinfo.NumAckPending, cinfo.NumPending)
 	}
 }

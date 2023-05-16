@@ -22,25 +22,32 @@ var (
 // For example: https://capture.blob.core.windows.net/backup/from-stream-foo/
 type BuildURLBase[K DestKey] func(ctx context.Context, destKey K) (string, error)
 
+// OverrideUploadOptions is an optional function to override various upload option (e.g. AccessTier)
+type OverrideUploadOptions[K DestKey] func(options *azblob.UploadStreamOptions, destKey K)
+
 type AzureBlobStore[K DestKey] struct {
-	credz        azcore.TokenCredential
-	buildURLBase BuildURLBase[K]
+	credz          azcore.TokenCredential
+	buildURLBaseFn BuildURLBase[K]
+	optionsFn      OverrideUploadOptions[K]
 }
 
 func NewAzureBlobStore[K DestKey](
 	credential azcore.TokenCredential,
-	buildURLBase BuildURLBase[K],
+	buildURLBaseFn BuildURLBase[K],
+	optionsFn OverrideUploadOptions[K],
+
 ) (*AzureBlobStore[K], error) {
 	return &AzureBlobStore[K]{
-		buildURLBase: buildURLBase,
-		credz:        credential,
+		buildURLBaseFn: buildURLBaseFn,
+		optionsFn:      optionsFn,
+		credz:          credential,
 	}, nil
 }
 
 func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey K, dir, fileName string) (string, int64, time.Duration, error) {
 	start := time.Now()
 
-	base, err := a.buildURLBase(ctx, destKey)
+	base, err := a.buildURLBaseFn(ctx, destKey)
 	if err != nil {
 		return "", 0, 0, err
 	}
@@ -59,7 +66,13 @@ func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey 
 
 	var options azblob.UploadStreamOptions
 
-	options.BufferSize = azureUploadBufferSz
+	if a.optionsFn != nil {
+		a.optionsFn(&options, destKey)
+	}
+
+	if options.BufferSize == 0 {
+		options.BufferSize = azureUploadBufferSz
+	}
 
 	reader := &countingReader{Reader: block}
 

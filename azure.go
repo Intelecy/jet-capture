@@ -3,9 +3,8 @@ package jetcapture
 import (
 	"context"
 	"io"
-	"net/http"
 	"net/url"
-	"os"
+	"strings"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -52,14 +51,17 @@ func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey 
 		return "", 0, 0, err
 	}
 
-	u, err := url.JoinPath(base, dir, fileName)
+	parsed, _ := url.Parse(base)
+	container, blobName, _ := strings.Cut(parsed.Path, "/")
+
+	u, err := url.JoinPath(blobName, dir, fileName)
 	if err != nil {
 		return "", 0, 0, err
 	}
 
-	log.Infof("writing block to %s", u)
+	log.Infof("writing block to https://%s%s/%s", parsed.Host, container, u)
 
-	bc, err := azblob.NewBlockBlobClient(u, a.credz, nil)
+	bc, err := azblob.NewClient("https://"+parsed.Host, a.credz, nil)
 	if err != nil {
 		return "", 0, 0, err
 	}
@@ -70,19 +72,15 @@ func (a *AzureBlobStore[K]) Write(ctx context.Context, block io.Reader, destKey 
 		a.optionsFn(&options, destKey)
 	}
 
-	if options.BufferSize == 0 {
-		options.BufferSize = azureUploadBufferSz
+	if options.BlockSize == 0 {
+		options.BlockSize = azureUploadBufferSz
 	}
 
 	reader := &countingReader{Reader: block}
 
-	resp, err := bc.UploadStream(ctx, reader, options)
+	_, err = bc.UploadStream(ctx, container, u, reader, &options)
 	if err != nil {
 		return "", 0, 0, err
-	}
-
-	if resp.RawResponse.StatusCode != http.StatusOK {
-		_, _ = io.Copy(os.Stderr, resp.RawResponse.Body)
 	}
 
 	return u, int64(reader.n), time.Since(start), nil
